@@ -21,6 +21,10 @@ jobs:
           ref: dev
           path: lobe-chat-src # 将代码存放在子目录中，避免与当前 workflow 所在目录混淆
 
+      - name: Fix Dockerfile for pnpm patches
+        run: |
+          sed -i '/COPY apps\/desktop\/src\/main\/package.json/a COPY patches ./patches' lobe-chat-src/Dockerfile
+      
       # 2. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
