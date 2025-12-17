@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: lobehub/lobe-chat
-          ref: dev
+          ref: next
           path: lobe-chat-src # 将代码存放在子目录中，避免与当前 workflow 所在目录混淆
 
       # 2. 设置 Docker Buildx
