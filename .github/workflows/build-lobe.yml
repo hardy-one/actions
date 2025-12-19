@@ -6,78 +6,314 @@ on:
     branches: [ "main" ]
 
 env:
-  # 修改为你的 Docker Hub 用户名/仓库名
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
 
 jobs:
   build_and_push:
     runs-on: ubuntu-latest
     steps:
+      # ============================================================
       # 1. 拉取目标仓库 (lobehub/lobe-chat) 的 dev 分支
+      # ============================================================
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
           repository: lobehub/lobe-chat
           ref: dev
-          path: lobe-chat-src # 将代码存放在子目录中，避免与当前 workflow 所在目录混淆
+          path: lobe-chat-src
 
+      # ============================================================
+      # 2. 修复 Dockerfile - 添加 patches 目录复制
+      # ============================================================
       - name: Fix Dockerfile for pnpm patches
         run: |
-          sed -i '/COPY apps\/desktop\/src\/main\/package.json/a COPY patches ./patches' lobe-chat-src/Dockerfile
-      
-      # 🆕 修复首页消息发送缺少 await 的问题
-      - name: Fix home sendMessage missing await
+          cd lobe-chat-src
+
+          echo "=== 原 Dockerfile 中的相关行 ==="
+          grep -n "COPY apps/desktop" Dockerfile || echo "未找到目标行"
+
+          # 在指定行后添加 COPY patches
+          sed -i '/COPY apps\/desktop\/src\/main\/package.json/a COPY patches ./patches' Dockerfile
+
+          echo ""
+          echo "=== 修改后的 Dockerfile 相关行 ==="
+          grep -A 1 "COPY apps/desktop" Dockerfile
+
+          cd ..
+
+      # ============================================================
+      # 3. 修复竞态条件 Bug - sendMessage 缺少 await
+      # ============================================================
+      - name: Fix race condition - Add await to sendMessage
         run: |
-          FILE="lobe-chat-src/src/app/[variants]/(main)/home/features/InputArea/useSend.ts"
-          
-          # 使用更精确的多行匹配，只修改 default 分支中的 sendMessage
-          sed -i '/default: {/,/router\.push/ {
-            s/^\(\s*\)sendMessage({$/\1await sendMessage({/
-          }' "$FILE"
-          
-          # 验证修改
-          echo "=== 验证修改结果 ==="
-          if grep -q "await sendMessage({" "$FILE"; then
-            echo "✅ 修复成功！"
-            grep -B 2 -A 10 "await sendMessage({" "$FILE"
-          else
-            echo "❌ 修复失败，请检查文件内容"
+          cd lobe-chat-src
+
+          FILE="src/app/[variants]/(main)/home/features/InputArea/useSend.ts"
+
+          # 检查文件存在性
+          if [ ! -f "$FILE" ]; then
+            echo "❌ 文件不存在: $FILE"
+            echo "尝试查找类似文件..."
+            find src -name "useSend.ts" -type f
             exit 1
           fi
 
-      # 2. 设置 Docker Buildx
+          echo "=== 修复前的代码 (第 53-69 行) ==="
+          sed -n '53,69p' "$FILE"
+
+          # 创建备份
+          cp "$FILE" "$FILE.backup"
+
+          # 方法1: 使用精确的行号替换（针对 dev 分支的第 57 行）
+          sed -i '57s/^\(\s*\)sendMessage({$/\1await sendMessage({/' "$FILE"
+
+          # 验证是否成功
+          if sed -n '57p' "$FILE" | grep -q "await sendMessage({"; then
+            echo ""
+            echo "✅ 修复成功（方法1：行号替换）"
+          else
+            echo ""
+            echo "⚠️ 方法1失败，尝试方法2（上下文匹配）..."
+
+            # 恢复备份
+            cp "$FILE.backup" "$FILE"
+
+            # 方法2: 使用上下文匹配
+            perl -i -pe '
+              BEGIN { $in_default = 0; $fixed = 0; }
+
+              # 检测进入 default 分支
+              if (/^\s+default:\s*\{/ && !$fixed) {
+                $in_default = 1;
+              }
+
+              # 在 default 分支内匹配 sendMessage
+              if ($in_default && /^(\s+)sendMessage\(\{$/ && !$fixed) {
+                $_ = "${1}await sendMessage({\n";
+                $fixed = 1;
+                $in_default = 0;
+              }
+
+              # 检测退出 default 分支
+              if ($in_default && /^\s+\}\s*$/) {
+                $in_default = 0;
+              }
+            ' "$FILE"
+
+            # 再次验证
+            if grep -A 15 "default: {" "$FILE" | head -20 | grep -q "await sendMessage({"; then
+              echo "✅ 修复成功（方法2：上下文匹配）"
+            else
+              echo "❌ 所有方法均失败"
+              echo ""
+              echo "=== 完整的 default 分支代码 ==="
+              sed -n '/default: {/,/^        }/p' "$FILE"
+              exit 1
+            fi
+          fi
+
+          echo ""
+          echo "=== 修复后的代码 (第 53-69 行) ==="
+          sed -n '53,69p' "$FILE"
+
+          # 删除备份
+          rm "$FILE.backup"
+
+          cd ..
+
+      # ============================================================
+      # 4. 修复 TypeScript 类型错误
+      # ============================================================
+      - name: Fix TypeScript type errors
+        run: |
+          cd lobe-chat-src
+
+          echo "============================================================"
+          echo "修复 1/3: useFetchFilesAndKnowledgeBases 类型定义"
+          echo "============================================================"
+
+          FILE1="src/store/agent/slices/knowledge/action.ts"
+
+          if [ ! -f "$FILE1" ]; then
+            echo "❌ 文件不存在: $FILE1"
+            exit 1
+          fi
+
+          # 备份
+          cp "$FILE1" "$FILE1.backup"
+
+          echo "修改前:"
+          grep -n "useFetchFilesAndKnowledgeBases:" "$FILE1" | head -1
+
+          # 修改类型定义：agentId: string -> agentId?: string
+          sed -i 's/useFetchFilesAndKnowledgeBases: (agentId: string)/useFetchFilesAndKnowledgeBases: (agentId?: string)/' "$FILE1"
+
+          echo "修改后:"
+          grep -n "useFetchFilesAndKnowledgeBases:" "$FILE1" | head -1
+
+          # 验证
+          if grep -q "useFetchFilesAndKnowledgeBases: (agentId?: string)" "$FILE1"; then
+            echo "✅ 修复成功"
+            rm "$FILE1.backup"
+          else
+            echo "❌ 修复失败，恢复备份"
+            mv "$FILE1.backup" "$FILE1"
+            exit 1
+          fi
+
+          echo ""
+          echo "============================================================"
+          echo "修复 2/3: action.test.ts 第 282 行缺少参数"
+          echo "============================================================"
+
+          FILE2="src/store/agent/slices/knowledge/action.test.ts"
+
+          if [ ! -f "$FILE2" ]; then
+            echo "❌ 文件不存在: $FILE2"
+            exit 1
+          fi
+
+          # 备份
+          cp "$FILE2" "$FILE2.backup"
+
+          echo "修改前:"
+          sed -n '282p' "$FILE2"
+
+          # 添加参数 'agent-1'
+          sed -i "282s/useFetchFilesAndKnowledgeBases()/useFetchFilesAndKnowledgeBases('agent-1')/" "$FILE2"
+
+          echo "修改后:"
+          sed -n '282p' "$FILE2"
+
+          # 验证
+          if sed -n '282p' "$FILE2" | grep -q "useFetchFilesAndKnowledgeBases('agent-1')"; then
+            echo "✅ 修复成功"
+            rm "$FILE2.backup"
+          else
+            echo "❌ 修复失败，恢复备份"
+            mv "$FILE2.backup" "$FILE2"
+            exit 1
+          fi
+
+          echo ""
+          echo "============================================================"
+          echo "修复 3/3: action.test.ts 第 298 行缺少参数"
+          echo "============================================================"
+
+          echo "修改前:"
+          sed -n '298p' "$FILE2"
+
+          # 添加参数 'agent-1'
+          sed -i "298s/useFetchFilesAndKnowledgeBases()/useFetchFilesAndKnowledgeBases('agent-1')/" "$FILE2"
+
+          echo "修改后:"
+          sed -n '298p' "$FILE2"
+
+          # 验证
+          if sed -n '298p' "$FILE2" | grep -q "useFetchFilesAndKnowledgeBases('agent-1')"; then
+            echo "✅ 修复成功"
+          else
+            echo "❌ 修复失败"
+            exit 1
+          fi
+
+          echo ""
+          echo "============================================================"
+          echo "✅ 所有 TypeScript 类型错误修复完成"
+          echo "============================================================"
+
+          cd ..
+
+      # ============================================================
+      # 5. 显示所有修改的摘要
+      # ============================================================
+      - name: Show all fixes summary
+        run: |
+          cd lobe-chat-src
+
+          echo "============================================================"
+          echo "                    修复摘要"
+          echo "============================================================"
+          echo ""
+          echo "1. Dockerfile patches 修复:"
+          grep -A 1 "COPY apps/desktop" Dockerfile | grep -c "COPY patches" && echo "   ✅ 已添加" || echo "   ❌ 未添加"
+
+          echo ""
+          echo "2. sendMessage await 修复:"
+          if grep -A 15 "default: {" src/app/[variants]/(main)/home/features/InputArea/useSend.ts | grep -q "await sendMessage({"; then
+            echo "   ✅ 已修复"
+            grep -A 3 "default: {" src/app/[variants]/(main)/home/features/InputArea/useSend.ts | grep "await sendMessage"
+          else
+            echo "   ❌ 未修复"
+          fi
+
+          echo ""
+          echo "3. TypeScript 类型错误修复:"
+          grep -q "useFetchFilesAndKnowledgeBases: (agentId?: string)" src/store/agent/slices/knowledge/action.ts && echo "   ✅ 类型定义已修复" || echo "   ❌ 类型定义未修复"
+          sed -n '282p' src/store/agent/slices/knowledge/action.test.ts | grep -q "useFetchFilesAndKnowledgeBases('agent-1')" && echo "   ✅ 测试行282已修复" || echo "   ❌ 测试行282未修复"
+          sed -n '298p' src/store/agent/slices/knowledge/action.test.ts | grep -q "useFetchFilesAndKnowledgeBases('agent-1')" && echo "   ✅ 测试行298已修复" || echo "   ❌ 测试行298未修复"
+
+          echo ""
+          echo "============================================================"
+
+          cd ..
+
+      # ============================================================
+      # 6. 设置 Docker Buildx
+      # ============================================================
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. 登录 Docker Hub
+      # ============================================================
+      # 7. 登录 Docker Hub
+      # ============================================================
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 4. 构建并推送 Docker 镜像
+      # ============================================================
+      # 8. 构建并推送 Docker 镜像
+      # ============================================================
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          # 关键修改：将上下文(context)指向拉取的源代码目录
+          # 指向修复后的源代码目录
           context: lobe-chat-src
-          # 关键修改：指定该目录下的 Dockerfile
           file: lobe-chat-src/Dockerfile
           push: true
-          # 显式指定只构建 amd64
+          # 显式指定只构建 amd64 架构
           platforms: linux/amd64
-          
-          # 显式设置构建参数 (Build Args)
-          # 注意：LobeChat 的 Dockerfile 必须支持这些 ARGS 才能生效
+
+          # 构建参数 (Better Auth 配置)
           build-args: |
             NEXT_PUBLIC_ENABLE_BETTER_AUTH=0
             NEXT_PUBLIC_ENABLE_NEXT_AUTH=1
-            
+
+          # 标签
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            
+
           # 使用 GitHub Actions 缓存加速构建
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # ============================================================
+      # 9. 输出构建结果
+      # ============================================================
+      - name: Build completed
+        run: |
+          echo "============================================================"
+          echo "                  构建完成！"
+          echo "============================================================"
+          echo ""
+          echo "镜像标签:"
+          echo "  - ${{ env.IMAGE_NAME }}:latest"
+          echo "  - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo ""
+          echo "拉取命令:"
+          echo "  docker pull ${{ env.IMAGE_NAME }}:latest"
+          echo ""
+          echo "============================================================"
