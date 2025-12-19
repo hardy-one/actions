@@ -1,4 +1,4 @@
-name: Build LobeChat (Better Auth / AMD64)
+name: Build LobeChat (AMD64)
 
 on:
   workflow_dispatch: # 推荐手动触发
@@ -37,7 +37,7 @@ jobs:
 
           echo ""
           echo "=== 修改后的 Dockerfile 相关行 ==="
-          grep -A 1 "COPY apps/desktop" Dockerfile
+          grep -A 1 "COPY apps/desktop" Dockerfile || echo "显示失败，但修改已完成"
 
           cd ..
 
@@ -54,7 +54,7 @@ jobs:
           if [ ! -f "$FILE" ]; then
             echo "❌ 文件不存在: $FILE"
             echo "尝试查找类似文件..."
-            find src -name "useSend.ts" -type f
+            find src -name "useSend.ts" -type f || echo "(未找到)"
             exit 1
           fi
 
@@ -107,7 +107,7 @@ jobs:
               echo "❌ 所有方法均失败"
               echo ""
               echo "=== 完整的 default 分支代码 ==="
-              sed -n '/default: {/,/^        }/p' "$FILE"
+              sed -n '/default: {/,/^        }/p' "$FILE" || echo "(无法显示代码)"
               exit 1
             fi
           fi
@@ -143,13 +143,13 @@ jobs:
           cp "$FILE1" "$FILE1.backup"
 
           echo "修改前:"
-          grep -n "useFetchFilesAndKnowledgeBases:" "$FILE1" | head -1
+          grep -n "useFetchFilesAndKnowledgeBases:" "$FILE1" | head -1 || echo "(未找到或显示失败)"
 
           # 修改类型定义：agentId: string -> agentId?: string
           sed -i 's/useFetchFilesAndKnowledgeBases: (agentId: string)/useFetchFilesAndKnowledgeBases: (agentId?: string)/' "$FILE1"
 
           echo "修改后:"
-          grep -n "useFetchFilesAndKnowledgeBases:" "$FILE1" | head -1
+          grep -n "useFetchFilesAndKnowledgeBases:" "$FILE1" | head -1 || echo "(未找到或显示失败)"
 
           # 验证
           if grep -q "useFetchFilesAndKnowledgeBases: (agentId?: string)" "$FILE1"; then
@@ -247,7 +247,7 @@ jobs:
           FILE_PATH="src/app/[variants]/(main)/home/features/InputArea/useSend.ts"
           if grep -A 15 "default: {" "$FILE_PATH" | grep -q "await sendMessage({"; then
             echo "   ✅ 已修复"
-            grep -A 3 "default: {" "$FILE_PATH" | grep "await sendMessage"
+            grep -A 15 "default: {" "$FILE_PATH" | grep "await sendMessage" || true
           else
             echo "   ❌ 未修复"
           fi
