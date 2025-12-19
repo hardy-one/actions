@@ -25,6 +25,26 @@ jobs:
         run: |
           sed -i '/COPY apps\/desktop\/src\/main\/package.json/a COPY patches ./patches' lobe-chat-src/Dockerfile
       
+      # 🆕 修复首页消息发送缺少 await 的问题
+      - name: Fix home sendMessage missing await
+        run: |
+          FILE="lobe-chat-src/src/app/[variants]/(main)/home/features/InputArea/useSend.ts"
+          
+          # 使用更精确的多行匹配，只修改 default 分支中的 sendMessage
+          sed -i '/default: {/,/router\.push/ {
+            s/^\(\s*\)sendMessage({$/\1await sendMessage({/
+          }' "$FILE"
+          
+          # 验证修改
+          echo "=== 验证修改结果 ==="
+          if grep -q "await sendMessage({" "$FILE"; then
+            echo "✅ 修复成功！"
+            grep -B 2 -A 10 "await sendMessage({" "$FILE"
+          else
+            echo "❌ 修复失败，请检查文件内容"
+            exit 1
+          fi
+
       # 2. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
