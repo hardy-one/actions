@@ -71,8 +71,8 @@ jobs:
           # 显式设置构建参数 (Build Args)
           # 注意：LobeChat 的 Dockerfile 必须支持这些 ARGS 才能生效
           build-args: |
-            NEXT_PUBLIC_ENABLE_BETTER_AUTH=1
-            NEXT_PUBLIC_ENABLE_NEXT_AUTH=0
+            NEXT_PUBLIC_ENABLE_BETTER_AUTH=0
+            NEXT_PUBLIC_ENABLE_NEXT_AUTH=1
             
           tags: |
             ${{ env.IMAGE_NAME }}:latest
