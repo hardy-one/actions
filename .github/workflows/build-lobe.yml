@@ -236,22 +236,41 @@ jobs:
           echo "============================================================"
           echo ""
           echo "1. Dockerfile patches 修复:"
-          grep -A 1 "COPY apps/desktop" Dockerfile | grep -c "COPY patches" && echo "   ✅ 已添加" || echo "   ❌ 未添加"
+          if grep -q "COPY patches ./patches" Dockerfile; then
+            echo "   ✅ 已添加"
+          else
+            echo "   ❌ 未添加"
+          fi
 
           echo ""
           echo "2. sendMessage await 修复:"
-          if grep -A 15 "default: {" src/app/[variants]/(main)/home/features/InputArea/useSend.ts | grep -q "await sendMessage({"; then
+          FILE_PATH="src/app/[variants]/(main)/home/features/InputArea/useSend.ts"
+          if grep -A 15 "default: {" "$FILE_PATH" | grep -q "await sendMessage({"; then
             echo "   ✅ 已修复"
-            grep -A 3 "default: {" src/app/[variants]/(main)/home/features/InputArea/useSend.ts | grep "await sendMessage"
+            grep -A 3 "default: {" "$FILE_PATH" | grep "await sendMessage"
           else
             echo "   ❌ 未修复"
           fi
 
           echo ""
           echo "3. TypeScript 类型错误修复:"
-          grep -q "useFetchFilesAndKnowledgeBases: (agentId?: string)" src/store/agent/slices/knowledge/action.ts && echo "   ✅ 类型定义已修复" || echo "   ❌ 类型定义未修复"
-          sed -n '282p' src/store/agent/slices/knowledge/action.test.ts | grep -q "useFetchFilesAndKnowledgeBases('agent-1')" && echo "   ✅ 测试行282已修复" || echo "   ❌ 测试行282未修复"
-          sed -n '298p' src/store/agent/slices/knowledge/action.test.ts | grep -q "useFetchFilesAndKnowledgeBases('agent-1')" && echo "   ✅ 测试行298已修复" || echo "   ❌ 测试行298未修复"
+          if grep -q "useFetchFilesAndKnowledgeBases: (agentId?: string)" src/store/agent/slices/knowledge/action.ts; then
+            echo "   ✅ 类型定义已修复"
+          else
+            echo "   ❌ 类型定义未修复"
+          fi
+
+          if sed -n '282p' src/store/agent/slices/knowledge/action.test.ts | grep -q "useFetchFilesAndKnowledgeBases('agent-1')"; then
+            echo "   ✅ 测试行282已修复"
+          else
+            echo "   ❌ 测试行282未修复"
+          fi
+
+          if sed -n '298p' src/store/agent/slices/knowledge/action.test.ts | grep -q "useFetchFilesAndKnowledgeBases('agent-1')"; then
+            echo "   ✅ 测试行298已修复"
+          else
+            echo "   ❌ 测试行298未修复"
+          fi
 
           echo ""
           echo "============================================================"
