@@ -218,8 +218,8 @@ jobs:
 
           # 构建参数 (Better Auth 配置)
           build-args: |
-            NEXT_PUBLIC_ENABLE_BETTER_AUTH=0
-            NEXT_PUBLIC_ENABLE_NEXT_AUTH=1
+            NEXT_PUBLIC_ENABLE_BETTER_AUTH=1
+            NEXT_PUBLIC_ENABLE_NEXT_AUTH=0
 
           # 标签
           tags: |
