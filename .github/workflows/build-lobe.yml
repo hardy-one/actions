@@ -18,8 +18,8 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          repository: lobehub/lobe-chat
-          ref: dev
+          repository: hardy-one/lobehub
+          ref: radical
           path: lobe-chat-src
 
       # ============================================================
