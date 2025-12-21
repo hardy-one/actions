@@ -6,7 +6,7 @@ on:
     branches: [ "main" ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub-Official
 
 jobs:
   build_and_push:
@@ -18,8 +18,8 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          repository: hardy-one/lobehub
-          ref: radical
+          repository: lobehub/lobe-chat
+          ref: dev
           path: lobe-chat-src
 
       # ============================================================
