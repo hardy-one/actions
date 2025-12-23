@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hardy-one/lobehub
-          ref: radical
+          ref: radical-new
           path: lobe-chat-src
 
       # ============================================================
