@@ -19,27 +19,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: lobehub/lobe-chat
-          ref: dev
+          ref: next
           path: lobe-chat-src
 
-      # ============================================================
-      # 2. 修复 Dockerfile - 添加 patches 目录复制
-      # ============================================================
-      - name: Fix Dockerfile for pnpm patches
-        run: |
-          cd lobe-chat-src
+      # # ============================================================
+      # # 2. 修复 Dockerfile - 添加 patches 目录复制
+      # # ============================================================
+      # - name: Fix Dockerfile for pnpm patches
+      #   run: |
+      #     cd lobe-chat-src
 
-          echo "=== 原 Dockerfile 中的相关行 ==="
-          grep -n "COPY apps/desktop" Dockerfile || echo "未找到目标行"
+      #     echo "=== 原 Dockerfile 中的相关行 ==="
+      #     grep -n "COPY apps/desktop" Dockerfile || echo "未找到目标行"
 
-          # 在指定行后添加 COPY patches
-          sed -i '/COPY apps\/desktop\/src\/main\/package.json/a COPY patches ./patches' Dockerfile
+      #     # 在指定行后添加 COPY patches
+      #     sed -i '/COPY apps\/desktop\/src\/main\/package.json/a COPY patches ./patches' Dockerfile
 
-          echo ""
-          echo "=== 修改后的 Dockerfile 相关行 ==="
-          grep -A 1 "COPY apps/desktop" Dockerfile || echo "显示失败，但修改已完成"
+      #     echo ""
+      #     echo "=== 修改后的 Dockerfile 相关行 ==="
+      #     grep -A 1 "COPY apps/desktop" Dockerfile || echo "显示失败，但修改已完成"
 
-          cd ..
+      #     cd ..
 
 
       # # ============================================================
