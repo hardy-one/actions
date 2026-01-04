@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hardy-one/lobehub
-          ref: fix/mobile-topic-agent-issues
+          ref: mimo-test
           path: lobe-chat-src
 
       # # ============================================================
