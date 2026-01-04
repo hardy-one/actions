@@ -6,7 +6,7 @@ on:
     branches: [ "main" ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub-mobile
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub-test
 
 jobs:
   build_and_push:
