@@ -6,7 +6,7 @@ on:
     branches: [ "main" ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub-official
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub-mobile
 
 jobs:
   build_and_push:
@@ -18,8 +18,8 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          repository: lobehub/lobe-chat
-          ref: next
+          repository: hardy-one/lobehub
+          ref: fix/mobile-topic-agent-issues
           path: lobe-chat-src
 
       # # ============================================================
