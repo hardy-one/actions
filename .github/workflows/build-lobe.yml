@@ -6,7 +6,7 @@ on:
     branches: [ "main" ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub-test
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobetest
 
 jobs:
   build_and_push:
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hardy-one/lobehub
-          ref: feat/mimo-autodisable-thinking
+          ref: test
           path: lobe-chat-src
 
       # # ============================================================
