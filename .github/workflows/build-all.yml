@@ -30,7 +30,7 @@ env:
 
 jobs:
   # ============================================================
-  # Job 1: 计算版本号（使用 GitHub API）
+  # Job 1: 计算版本号
   # ============================================================
   calculate-version:
     name: Calculate Version
@@ -184,8 +184,8 @@ jobs:
       - name: Clean previous build artifacts (Windows)
         shell: pwsh
         run: |
-          Remove-Item -Path apps\desktop\release -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path apps\desktop\dist -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path release -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path dist -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path C:\temp -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -Path C:\temp -ItemType Directory -Force
         env:
@@ -206,63 +206,27 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 10. 🔍 诊断：显示所有构建产物（关键步骤）
-      - name: Find all build artifacts
+      # 10. 显示构建产物
+      - name: List build artifacts
         run: |
           echo "============================================================"
-          echo "  🔍 搜索所有可能的构建产物..."
+          echo "  构建产物列表"
           echo "============================================================"
-          
-          echo ""
-          echo "=== 根目录结构 ==="
-          ls -la
-          
-          echo ""
-          echo "=== apps 目录 ==="
-          ls -la apps/ 2>/dev/null || echo "apps/ 不存在"
-          
-          echo ""
-          echo "=== apps/desktop 目录 ==="
-          ls -la apps/desktop/ 2>/dev/null || echo "apps/desktop/ 不存在"
-          
-          echo ""
-          echo "=== dist 目录（如果有）==="
-          find . -type d -name "dist" 2>/dev/null | head -20
-          
-          echo ""
-          echo "=== release 目录（如果有）==="
-          find . -type d -name "release" 2>/dev/null | head -20
-          
-          echo ""
-          echo "=== .exe 文件 ==="
-          find . -name "*.exe" -type f 2>/dev/null | head -20
-          
-          echo ""
-          echo "=== .msi 文件 ==="
-          find . -name "*.msi" -type f 2>/dev/null | head -20
-          
-          echo ""
-          echo "=== .zip 文件 ==="
-          find . -name "*.zip" -type f 2>/dev/null | head -20
-          
+          Get-ChildItem -Path release -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
           echo "============================================================"
 
-      # 11. 上传构建产物（使用动态路径）
+      # 11. 上传构建产物（正确路径：release/）
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
           path: |
-            **/dist/**/*.exe
-            **/dist/**/*.msi
-            **/dist/**/*.zip
-            **/release/**/*.exe
-            **/release/**/*.msi
-            **/release/**/*.zip
+            release/*.exe
+            release/*.msi
+            release/*.zip
           retention-days: 3
-          if-no-files-found: warn
 
-      # 12. 创建 GitHub Release
+      # 12. 创建 GitHub Release（升级到 v2，正确路径）
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -281,13 +245,13 @@ jobs:
             ### ⚠️ 注意事项
             - 自动构建版本，仅供测试
             - 请备份数据后使用
+
+            ### 📦 安装
+            下载 `.exe` 文件运行安装
           files: |
-            **/dist/*.exe
-            **/dist/*.msi
-            **/dist/*.zip
-            **/release/*.exe
-            **/release/*.msi
-            **/release/*.zip
+            release/*.exe
+            release/*.msi
+            release/*.zip
           fail_on_unmatched_files: false
           generate_release_notes: true
         env:
