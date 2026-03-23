@@ -109,6 +109,7 @@ jobs:
     needs: [calculate-version]
     
     steps:
+      # 1. checkout 到根目录（关键：没有 path 参数）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
@@ -116,20 +117,24 @@ jobs:
           ref: ${{ env.SOURCE_BRANCH }}
           fetch-depth: 0
 
+      # 2. 设置 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
+      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
+      # 4. 安装依赖（pnpm 会自动从 package.json 读取版本）
       - name: Install dependencies
         run: pnpm install --node-linker=hoisted
 
+      # 5. 移除国内 electron 镜像
       - name: Remove China electron mirror
         shell: bash
         run: |
@@ -138,29 +143,15 @@ jobs:
             rm -f "./apps/desktop/.npmrc.bak"
           fi
 
+      # 6. 在 apps/desktop 单独安装依赖（官方流程）
       - name: Install deps on Desktop
         run: npm run install-isolated --prefix=./apps/desktop
 
+      # 7. 设置版本号
       - name: Set package version
         run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} canary
 
-      # ✅ 修复：只清理 dist，不清理 release
-      - name: Clean previous build artifacts
-        shell: pwsh
-        run: |
-          # 只清理 dist 目录（构建临时文件）
-          Remove-Item -Path dist -Recurse -Force -ErrorAction SilentlyContinue
-          
-          # 清理 C:\temp
-          Remove-Item -Path C:\temp -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -Path C:\temp -ItemType Directory -Force
-          
-          Write-Host "✅ 已清理 dist 和 C:\temp"
-          Write-Host "ℹ️ release 目录保留（如果有旧版本）"
-        env:
-          TEMP: C:\temp
-          TMP: C:\temp
-
+      # 8. 构建并打包（关键：使用官方命令）
       - name: Build Windows App
         run: npm run desktop:package:app
         env:
@@ -174,81 +165,21 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 🔍 诊断：查找所有 exe 文件
-      - name: Find all executables
+      # 9. 显示 release 目录内容（诊断用）
+      - name: List release directory
         shell: pwsh
         run: |
           Write-Host "============================================================"
-          Write-Host "  搜索所有构建产物..."
+          Write-Host "  release 目录内容"
           Write-Host "============================================================"
-          
-          Write-Host ""
-          Write-Host "=== 当前目录结构 ==="
-          Get-ChildItem -Force | Select-Object Name, PSIsContainer | Format-Table
-        
-          Write-Host ""
-          Write-Host "=== release 目录（如果有）==="
           if (Test-Path release) {
-            Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table
+            Get-ChildItem -Path release -File | Format-Table Name, Length -AutoSize
           } else {
-            Write-Host "❌ release 目录不存在"
+            Write-Host "❌ release 目录不存在！"
           }
-          
-          Write-Host ""
-          Write-Host "=== dist 目录（如果有）==="
-          if (Test-Path dist) {
-            Get-ChildItem -Path dist -Recurse -File -Filter *.exe | Select-Object FullName, Length | Format-Table
-          } else {
-            Write-Host "❌ dist 目录不存在"
-          }
-          
-          Write-Host ""
-          Write-Host "=== 所有 *-setup.exe 文件 ==="
-          $setupFiles = Get-ChildItem -Path . -Filter "*-setup.exe" -Recurse -ErrorAction SilentlyContinue
-          if ($setupFiles) {
-            $setupFiles | Select-Object FullName, Length | Format-Table
-          } else {
-            Write-Host "❌ 未找到 *-setup.exe 文件"
-          }
-          
           Write-Host "============================================================"
 
-      # 🔍 查找主安装程序（搜索所有目录）
-      - name: Find setup executable
-        id: setup_file
-        shell: pwsh
-        run: |
-          Write-Host "============================================================"
-          Write-Host "  查找主安装程序..."
-          Write-Host "============================================================"
-          
-          # 在所有目录中查找 *-setup.exe 文件
-          $setupFile = Get-ChildItem -Path . -Filter "*-setup.exe" -Recurse -File | 
-            Where-Object { $_.Name -notlike "*__uninstaller*" } |
-            Select-Object -First 1
-          
-          if ($setupFile) {
-            Write-Host "✅ 找到主安装程序：$($setupFile.Name)"
-            Write-Host "   完整路径：$($setupFile.FullName)"
-            Write-Host "   文件大小：$([math]::Round($setupFile.Length / 1MB, 2)) MB"
-            
-            # 复制文件到根目录 release 文件夹
-            $releaseDir = Join-Path $PWD "release"
-            if (-not (Test-Path $releaseDir)) {
-              New-Item -Path $releaseDir -ItemType Directory -Force | Out-Null
-            }
-            $destPath = Join-Path $releaseDir $setupFile.Name
-            Copy-Item -Path $setupFile.FullName -Destination $destPath -Force
-            Write-Host "✅ 已复制到：$destPath"
-            
-            echo "filename=$($setupFile.Name)" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Host "❌ 未找到 *-setup.exe 文件！"
-            echo "filename=" >> $env:GITHUB_OUTPUT
-          }
-          
-          Write-Host "============================================================"
-
+      # 10. 上传 artifact
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -256,6 +187,7 @@ jobs:
           path: release/
           retention-days: 3
 
+      # 11. 创建 Release（只上传 setup.exe）
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -265,10 +197,3 @@ jobs:
           files: release/*-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Windows build completed
-        shell: pwsh
-        run: |
-          Write-Host "============================================================"
-          Write-Host "  Windows 构建完成！"
-          Write-Host "============================================================"
