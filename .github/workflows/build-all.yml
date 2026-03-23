@@ -23,14 +23,13 @@ env:
 
 jobs:
   # ============================================================
-  # Job 1: 构建 Docker 镜像（保留你的流程）
+  # Job 1: 构建 Docker 镜像
   # ============================================================
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
     
     steps:
-      # 1. 拉取源代码（升级到 v6）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
@@ -38,18 +37,15 @@ jobs:
           ref: next
           path: lobe-chat-src
 
-      # 2. 设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. 登录 Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 4. 构建并推送 Docker 镜像
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -66,7 +62,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 5. 输出构建结果
       - name: Docker build completed
         run: |
           echo "============================================================"
@@ -78,14 +73,14 @@ jobs:
           echo "============================================================"
 
   # ============================================================
-  # Job 2: 构建 Windows 桌面应用（采用官方流程）
+  # Job 2: 构建 Windows 桌面应用（使用 pnpm 保证 workspace 正确）
   # ============================================================
   build-windows:
     name: Build Windows Desktop
     runs-on: windows-2025
     
     steps:
-      # 1. 拉取源代码（官方：checkout@v6 + fetch-depth: 0）
+      # 1. 拉取源代码
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
@@ -94,32 +89,32 @@ jobs:
           path: lobe-chat-src
           fetch-depth: 0
 
-      # 2. 设置 Node.js（官方：setup-node@v6 + package-manager-cache: false）
+      # 2. 设置 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
 
-      # 3. 安装 Bun（官方：setup-bun@v2）
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+      # 3. 安装 pnpm（关键：项目是 pnpm workspace）
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          bun-version: latest
+          version: 10
 
-      # 4. 安装依赖（官方：bun i）
+      # 4. 安装依赖（pnpm workspace 安装）
       - name: Install dependencies
         working-directory: lobe-chat-src
-        run: bun i
+        run: pnpm install --frozen-lockfile
 
-      # 5. 设置版本号（官方：workflow:set-desktop-version）
+      # 5. 设置版本号
       - name: Set package version
         working-directory: lobe-chat-src
-        run: bunx npm run workflow:set-desktop-version ${{ github.run_number }} canary
+        run: pnpm exec npm run workflow:set-desktop-version ${{ github.run_number }} canary
 
-      # 6. Windows 构建前清理（官方流程）
+      # 6. Windows 构建前清理
       - name: Clean previous build artifacts (Windows)
         working-directory: lobe-chat-src
+        shell: pwsh
         run: |
           Remove-Item -Path apps\desktop\release -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path apps\desktop\dist -Recurse -Force -ErrorAction SilentlyContinue
@@ -129,10 +124,10 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 7. 构建并打包 Windows 应用（官方：desktop:package:app + 完整环境变量）
+      # 7. 构建并打包 Windows 应用（使用 pnpm 运行 workspace 脚本）
       - name: Build artifact on Windows
         working-directory: lobe-chat-src
-        run: bun run desktop:package:app
+        run: pnpm run desktop:package:app
         env:
           UPDATE_CHANNEL: canary
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
@@ -155,7 +150,7 @@ jobs:
           Get-ChildItem -Path apps\desktop\release -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
           echo "============================================================"
 
-      # 9. 上传构建产物（官方：upload-artifact@v6）
+      # 9. 上传构建产物
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
