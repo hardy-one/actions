@@ -1,24 +1,16 @@
 name: Build LobeChat (Docker + Windows)
 
-# ============================================
-# 仅手动触发
-# ============================================
 on:
   workflow_dispatch:
     inputs:
       docker_tag:
-        description: 'Docker tag (e.g., latest, dev)'
+        description: 'Docker tag'
         required: false
         type: string
         default: 'latest'
       
       version:
-        description: 'Version number (e.g., 1.0.0)'
-        required: false
-        type: string
-      
-      release_notes:
-        description: 'Release notes (optional)'
+        description: 'Version number'
         required: false
         type: string
 
@@ -29,9 +21,6 @@ env:
   SOURCE_BRANCH: next
 
 jobs:
-  # ============================================================
-  # Job 1: 计算版本号
-  # ============================================================
   calculate-version:
     name: Calculate Version
     runs-on: ubuntu-latest
@@ -77,9 +66,6 @@ jobs:
             echo "tag=${{ steps.version_auto.outputs.tag }}" >> $GITHUB_OUTPUT
           fi
 
-  # ============================================================
-  # Job 2: 构建 Docker 镜像
-  # ============================================================
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
@@ -93,16 +79,16 @@ jobs:
           ref: ${{ env.SOURCE_BRANCH }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4  # ✅ 升级到 v4
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4  # ✅ 升级到 v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6  # ✅ 升级到 v6
         with:
           context: .
           file: ./Dockerfile
@@ -117,26 +103,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Docker build completed
-        run: |
-          echo "============================================================"
-          echo "  🐳 Docker 构建完成！"
-          echo "============================================================"
-          echo "镜像标签:"
-          echo " - ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag }}"
-          echo " - ${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.version }}"
-          echo "============================================================"
-
-  # ============================================================
-  # Job 3: 构建 Windows 桌面应用
-  # ============================================================
   build-windows:
     name: Build Windows Desktop
     runs-on: windows-2025
     needs: [calculate-version]
     
     steps:
-      # 1. 拉取源代码
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
@@ -144,44 +116,35 @@ jobs:
           ref: ${{ env.SOURCE_BRANCH }}
           fetch-depth: 0
 
-      # 2. 设置 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
-      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      # 4. 安装根目录依赖
-      - name: Install dependencies (root)
+      - name: Install dependencies
         run: pnpm install --node-linker=hoisted
 
-      # 5. 移除国内 electron 镜像配置
-      - name: Remove China electron mirror from .npmrc
+      - name: Remove China electron mirror
         shell: bash
         run: |
-          NPMRC_FILE="./apps/desktop/.npmrc"
-          if [ -f "$NPMRC_FILE" ]; then
-            sed -i.bak '/^electron_mirror=/d; /^electron_builder_binaries_mirror=/d' "$NPMRC_FILE"
-            rm -f "${NPMRC_FILE}.bak"
-            echo "✅ Removed electron mirror config from .npmrc"
+          if [ -f "./apps/desktop/.npmrc" ]; then
+            sed -i.bak '/^electron_mirror=/d; /^electron_builder_binaries_mirror=/d' "./apps/desktop/.npmrc"
+            rm -f "./apps/desktop/.npmrc.bak"
           fi
 
-      # 6. 在 apps/desktop 下单独安装依赖
       - name: Install deps on Desktop
         run: npm run install-isolated --prefix=./apps/desktop
 
-      # 7. 设置版本号
       - name: Set package version
         run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} canary
 
-      # 8. Windows 构建前清理
-      - name: Clean previous build artifacts (Windows)
+      - name: Clean previous build
         shell: pwsh
         run: |
           Remove-Item -Path release -Recurse -Force -ErrorAction SilentlyContinue
@@ -192,8 +155,7 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 9. 构建并打包 Windows 应用
-      - name: Build artifact on Windows
+      - name: Build Windows App
         run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: canary
@@ -206,66 +168,76 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 10. 显示构建产物
-      - name: List build artifacts
+      # 🔍 诊断：找出所有 exe/msi/zip 文件
+      - name: Find all build artifacts
+        shell: pwsh
         run: |
-          echo "============================================================"
-          echo "  构建产物列表"
-          echo "============================================================"
-          Get-ChildItem -Path release -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
-          echo "============================================================"
+          Write-Host "============================================================"
+          Write-Host "  🔍 搜索构建产物..."
+          Write-Host "============================================================"
+          
+          Write-Host ""
+          Write-Host "=== 当前目录 ==="
+          Get-ChildItem -Force | Select-Object Name, Length | Format-Table
+        
+          Write-Host ""
+          Write-Host "=== 所有 .exe 文件 ==="
+          $exeFiles = Get-ChildItem -Path . -Filter *.exe -Recurse -ErrorAction SilentlyContinue
+          if ($exeFiles) {
+            $exeFiles | Select-Object FullName, Length | Format-Table
+          } else {
+            Write-Host "未找到 .exe 文件"
+          }
+          
+          Write-Host ""
+          Write-Host "=== 所有 .msi 文件 ==="
+          $msiFiles = Get-ChildItem -Path . -Filter *.msi -Recurse -ErrorAction SilentlyContinue
+          if ($msiFiles) {
+            $msiFiles | Select-Object FullName, Length | Format-Table
+          } else {
+            Write-Host "未找到 .msi 文件"
+          }
+          
+          Write-Host ""
+          Write-Host "=== 所有 .zip 文件 ==="
+          $zipFiles = Get-ChildItem -Path . -Filter *.zip -Recurse -ErrorAction SilentlyContinue
+          if ($zipFiles) {
+            $zipFiles | Select-Object FullName, Length | Format-Table
+          } else {
+            Write-Host "未找到 .zip 文件"
+          }
+          
+          Write-Host "============================================================"
 
-      # 11. 上传构建产物（正确路径：release/）
+      # 📦 上传所有找到的文件
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
           path: |
-            release/*.exe
-            release/*.msi
-            release/*.zip
+            **/*.exe
+            **/*.msi
+            **/*.zip
           retention-days: 3
+          if-no-files-found: warn
 
-      # 12. 创建 GitHub Release（升级到 v2，正确路径）
+      # 🎯 创建 Release（使用动态路径）
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
-          name: 'Windows Build ${{ needs.calculate-version.outputs.tag }}'
-          body: |
-            ## 🪟 Windows Desktop Build
-
-            - **Source**: ${{ env.SOURCE_REPO }}@${{ env.SOURCE_BRANCH }}
-            - **Version**: ${{ needs.calculate-version.outputs.version }}
-            - **Commit**: ${{ github.sha }}
-            - **Build Number**: ${{ github.run_number }}
-
-            ${{ inputs.release_notes && format('### 📝 更新说明\n{0}', inputs.release_notes) || '' }}
-
-            ### ⚠️ 注意事项
-            - 自动构建版本，仅供测试
-            - 请备份数据后使用
-
-            ### 📦 安装
-            下载 `.exe` 文件运行安装
+          name: ${{ needs.calculate-version.outputs.tag }}
+          body: ""
           files: |
-            release/*.exe
-            release/*.msi
-            release/*.zip
+            **/*.exe
+            **/*.msi
+            **/*.zip
           fail_on_unmatched_files: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 13. 构建完成输出
       - name: Windows build completed
         run: |
-          echo "============================================================"
-          echo "  🪟 Windows 构建完成！"
-          echo "============================================================"
-          echo "版本：${{ needs.calculate-version.outputs.tag }}"
-          echo "源码：${{ env.SOURCE_REPO }}@${{ env.SOURCE_BRANCH }}"
-          echo ""
-          echo "Release 地址:"
-          echo " https://github.com/${{ github.repository }}/releases"
-          echo "============================================================"
+          Write-Host "============================================================"
+          Write-Host "  Windows 构建完成！"
+          Write-Host "============================================================"
