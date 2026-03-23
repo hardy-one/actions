@@ -73,20 +73,19 @@ jobs:
           echo "============================================================"
 
   # ============================================================
-  # Job 2: 构建 Windows 桌面应用（使用 pnpm 保证 workspace 正确）
+  # Job 2: 构建 Windows 桌面应用（完全模拟官方 + desktop-build-setup）
   # ============================================================
   build-windows:
     name: Build Windows Desktop
     runs-on: windows-2025
     
     steps:
-      # 1. 拉取源代码
+      # 1. 拉取源代码（直接到根目录）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
           repository: hardy-one/lobehub
           ref: next
-          path: lobe-chat-src
           fetch-depth: 0
 
       # 2. 设置 Node.js
@@ -94,26 +93,39 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
 
-      # 3. 安装 pnpm（关键：项目是 pnpm workspace）
+      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
+          run_install: false
 
-      # 4. 安装依赖（pnpm workspace 安装）
-      - name: Install dependencies
-        working-directory: lobe-chat-src
-        run: pnpm install --frozen-lockfile
+      # 4. 安装根目录依赖（关键：--node-linker=hoisted）
+      - name: Install dependencies (root)
+        run: pnpm install --node-linker=hoisted
 
-      # 5. 设置版本号
+      # 5. 移除国内 electron 镜像配置（如果有）
+      - name: Remove China electron mirror from .npmrc
+        shell: bash
+        run: |
+          NPMRC_FILE="./apps/desktop/.npmrc"
+          if [ -f "$NPMRC_FILE" ]; then
+            sed -i.bak '/^electron_mirror=/d; /^electron_builder_binaries_mirror=/d' "$NPMRC_FILE"
+            rm -f "${NPMRC_FILE}.bak"
+            echo "✅ Removed electron mirror config from .npmrc"
+          fi
+
+      # 6. 在 apps/desktop 下单独安装依赖（最关键！）
+      - name: Install deps on Desktop
+        run: npm run install-isolated --prefix=./apps/desktop
+
+      # 7. 设置版本号
       - name: Set package version
-        working-directory: lobe-chat-src
-        run: pnpm exec npm run workflow:set-desktop-version ${{ github.run_number }} canary
+        run: npm run workflow:set-desktop-version ${{ github.run_number }} canary
 
-      # 6. Windows 构建前清理
+      # 8. Windows 构建前清理
       - name: Clean previous build artifacts (Windows)
-        working-directory: lobe-chat-src
         shell: pwsh
         run: |
           Remove-Item -Path apps\desktop\release -Recurse -Force -ErrorAction SilentlyContinue
@@ -124,10 +136,9 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 7. 构建并打包 Windows 应用（使用 pnpm 运行 workspace 脚本）
+      # 9. 构建并打包 Windows 应用
       - name: Build artifact on Windows
-        working-directory: lobe-chat-src
-        run: pnpm run desktop:package:app
+        run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: canary
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
@@ -139,9 +150,8 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 8. 显示构建产物
+      # 10. 显示构建产物
       - name: List final artifacts
-        working-directory: lobe-chat-src
         run: |
           echo "============================================================"
           echo "  构建产物列表"
@@ -150,17 +160,17 @@ jobs:
           Get-ChildItem -Path apps\desktop\release -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
           echo "============================================================"
 
-      # 9. 上传构建产物
+      # 11. 上传构建产物
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
           path: |
-            lobe-chat-src/apps/desktop/dist/
-            lobe-chat-src/apps/desktop/release/
+            apps/desktop/dist/
+            apps/desktop/release/
           retention-days: 3
 
-      # 10. 创建 GitHub Release
+      # 12. 创建 GitHub Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -182,20 +192,19 @@ jobs:
             ### 📦 安装
             下载 `.exe` 文件运行安装
           files: |
-            lobe-chat-src/apps/desktop/dist/latest*
-            lobe-chat-src/apps/desktop/dist/*.exe*
-            lobe-chat-src/apps/desktop/dist/*.msi
-            lobe-chat-src/apps/desktop/dist/*.zip*
-            lobe-chat-src/apps/desktop/release/latest*
-            lobe-chat-src/apps/desktop/release/*.exe*
-            lobe-chat-src/apps/desktop/release/*.msi
-            lobe-chat-src/apps/desktop/release/*.zip*
+            apps/desktop/dist/latest*
+            apps/desktop/dist/*.exe*
+            apps/desktop/dist/*.msi
+            apps/desktop/dist/*.zip*
+            apps/desktop/release/latest*
+            apps/desktop/release/*.exe*
+            apps/desktop/release/*.msi
+            apps/desktop/release/*.zip*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 11. 构建完成输出
+      # 13. 构建完成输出
       - name: Windows build completed
-        working-directory: lobe-chat-src
         run: |
           echo "============================================================"
           echo "  🪟 Windows 构建完成！"
