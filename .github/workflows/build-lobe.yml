@@ -18,8 +18,8 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          repository: lobehub/lobehub
-          ref: canary
+          repository: hardy-one/lobehub
+          ref: feat/coding-plan-providers
           path: lobe-chat-src
 
       # # ============================================================
