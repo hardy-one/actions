@@ -25,10 +25,13 @@ on:
 env:
   NODE_VERSION: '24.11.1'
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
+  # 目标仓库配置
+  SOURCE_REPO: hardy-one/lobehub
+  SOURCE_BRANCH: next
 
 jobs:
   # ============================================================
-  # Job 1: 计算版本号
+  # Job 1: 计算版本号（从目标仓库获取 tags）
   # ============================================================
   calculate-version:
     name: Calculate Version
@@ -38,13 +41,16 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     
     steps:
-      - name: Checkout code
+      # 1. 从目标仓库拉取代码（带 tags）
+      - name: Checkout source code
         uses: actions/checkout@v6
         with:
-          repository: hardy-one/lobehub
-          ref: next
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
           fetch-depth: 0
+          fetch-tags: true
 
+      # 2. 计算版本号
       - name: Calculate version
         id: version
         shell: bash
@@ -55,12 +61,13 @@ jobs:
             tag="v${version}"
             echo "✅ Using manual version: ${version}"
           else
-            # 获取最新的 stable tag
+            # 从目标仓库获取最新的 stable tag
             latest_tag=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
             
             if [ -z "$latest_tag" ]; then
-              echo "⚠️ No stable tag found, using default"
-              version="1.0.0"
+              # 没有 tag 时使用日期版本
+              version="$(date +%Y.%m.%d).${{ github.run_number }}"
+              echo "⚠️ No stable tag found, using date version: ${version}"
             else
               echo "📌 Latest stable tag: $latest_tag"
               # 去掉 v 前缀，解析 major.minor.patch
@@ -68,9 +75,9 @@ jobs:
               IFS='.' read -r major minor patch <<< "$base_version"
               new_patch=$((patch + 1))
               version="${major}.${minor}.${new_patch}"
+              echo "✅ Calculated version: ${version}"
             fi
             tag="v${version}"
-            echo "✅ Calculated version: ${version}"
           fi
           
           echo "version=${version}" >> $GITHUB_OUTPUT
@@ -88,8 +95,8 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
-          repository: hardy-one/lobehub
-          ref: next
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
           path: lobe-chat-src
 
       - name: Set up Docker Buildx
@@ -136,13 +143,14 @@ jobs:
     needs: [calculate-version]
     
     steps:
-      # 1. 拉取源代码
+      # 1. 从目标仓库拉取代码（带 tags）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
-          repository: hardy-one/lobehub
-          ref: next
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
           fetch-depth: 0
+          fetch-tags: true
 
       # 2. 设置 Node.js
       - name: Setup Node.js
@@ -176,7 +184,7 @@ jobs:
       - name: Install deps on Desktop
         run: npm run install-isolated --prefix=./apps/desktop
 
-      # 7. 设置版本号（使用计算出的完整版本号）
+      # 7. 设置版本号
       - name: Set package version
         run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} canary
 
@@ -235,10 +243,10 @@ jobs:
           body: |
             ## 🪟 Windows Desktop Build
 
+            - **Source**: ${{ env.SOURCE_REPO }}@${{ env.SOURCE_BRANCH }}
             - **Version**: ${{ needs.calculate-version.outputs.version }}
             - **Commit**: ${{ github.sha }}
             - **Build Number**: ${{ github.run_number }}
-            - **Branch**: ${{ github.ref_name }}
 
             ${{ inputs.release_notes && format('### 📝 更新说明\n{0}', inputs.release_notes) || '' }}
 
@@ -267,6 +275,7 @@ jobs:
           echo "  🪟 Windows 构建完成！"
           echo "============================================================"
           echo "版本：${{ needs.calculate-version.outputs.tag }}"
+          echo "源码：${{ env.SOURCE_REPO }}@${{ env.SOURCE_BRANCH }}"
           echo ""
           echo "Release 地址:"
           echo " https://github.com/${{ github.repository }}/releases"
