@@ -25,13 +25,12 @@ on:
 env:
   NODE_VERSION: '24.11.1'
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/lobehub
-  # 目标仓库配置
   SOURCE_REPO: hardy-one/lobehub
   SOURCE_BRANCH: next
 
 jobs:
   # ============================================================
-  # Job 1: 计算版本号（从目标仓库获取 tags）
+  # Job 1: 计算版本号（使用 GitHub API，不依赖 fetch-tags）
   # ============================================================
   calculate-version:
     name: Calculate Version
@@ -41,47 +40,58 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     
     steps:
-      # 1. 从目标仓库拉取代码（带 tags）
-      - name: Checkout source code
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ env.SOURCE_BRANCH }}
-          fetch-depth: 0
-          fetch-tags: true
-
-      # 2. 计算版本号
-      - name: Calculate version
-        id: version
-        shell: bash
+      # 步骤 1: 如果手动指定版本号，直接使用
+      - name: Use manual version
+        if: ${{ inputs.version != '' && inputs.version != null }}
+        id: version_manual
         run: |
-          # 如果手动指定了版本号，直接使用
-          if [ -n "${{ inputs.version }}" ]; then
-            version="${{ inputs.version }}"
-            tag="v${version}"
-            echo "✅ Using manual version: ${version}"
+          echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+          echo "✅ Using manual version: ${{ inputs.version }}"
+
+      # 步骤 2: 否则使用 GitHub API 获取最新 tag
+      - name: Get latest tag via GitHub API
+        if: ${{ inputs.version == '' || inputs.version == null }}
+        id: version_auto
+        run: |
+          echo "🔍 Fetching tags from ${{ env.SOURCE_REPO }} via GitHub API..."
+          
+          # 使用 GitHub API 获取 tags
+          response=$(curl -s "https://api.github.com/repos/${{ env.SOURCE_REPO }}/tags?per_page=100")
+          
+          # 解析第一个稳定版本 tag (格式：vX.Y.Z)
+          latest_tag=$(echo "$response" | grep -oE '"name":\s*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/v\1/')
+          
+          if [ -z "$latest_tag" ]; then
+            # 没有 tag 时使用日期版本
+            version="$(date +%Y.%m.%d).${{ github.run_number }}"
+            echo "⚠️ No stable tag found, using date version: ${version}"
           else
-            # 从目标仓库获取最新的 stable tag
-            latest_tag=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
-            
-            if [ -z "$latest_tag" ]; then
-              # 没有 tag 时使用日期版本
-              version="$(date +%Y.%m.%d).${{ github.run_number }}"
-              echo "⚠️ No stable tag found, using date version: ${version}"
-            else
-              echo "📌 Latest stable tag: $latest_tag"
-              # 去掉 v 前缀，解析 major.minor.patch
-              base_version="${latest_tag#v}"
-              IFS='.' read -r major minor patch <<< "$base_version"
-              new_patch=$((patch + 1))
-              version="${major}.${minor}.${new_patch}"
-              echo "✅ Calculated version: ${version}"
-            fi
-            tag="v${version}"
+            # 基于最新 tag 计算 (v2.1.28 → 2.1.29)
+            base_version="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "$base_version"
+            new_patch=$((patch + 1))
+            version="${major}.${minor}.${new_patch}"
+            echo "📌 Latest tag: $latest_tag → New version: ${version}"
           fi
           
           echo "version=${version}" >> $GITHUB_OUTPUT
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
+          echo "tag=v${version}" >> $GITHUB_OUTPUT
+          echo "✅ Version calculation complete"
+
+      # 步骤 3: 合并输出
+      - name: Set version output
+        id: version
+        run: |
+          if [ -n "${{ steps.version_manual.outputs.version }}" ]; then
+            echo "version=${{ steps.version_manual.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.version_manual.outputs.tag }}" >> $GITHUB_OUTPUT
+            echo "✅ Using manual version"
+          else
+            echo "version=${{ steps.version_auto.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ steps.version_auto.outputs.tag }}" >> $GITHUB_OUTPUT
+            echo "✅ Using auto-calculated version"
+          fi
 
   # ============================================================
   # Job 2: 构建 Docker 镜像
@@ -143,14 +153,13 @@ jobs:
     needs: [calculate-version]
     
     steps:
-      # 1. 从目标仓库拉取代码（带 tags）
+      # 1. 拉取源代码（不需要 fetch-tags）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_BRANCH }}
-          fetch-depth: 0
-          fetch-tags: true
+          path: lobe-chat-src
 
       # 2. 设置 Node.js
       - name: Setup Node.js
@@ -167,10 +176,12 @@ jobs:
 
       # 4. 安装根目录依赖
       - name: Install dependencies (root)
+        working-directory: lobe-chat-src
         run: pnpm install --node-linker=hoisted
 
       # 5. 移除国内 electron 镜像配置
       - name: Remove China electron mirror from .npmrc
+        working-directory: lobe-chat-src
         shell: bash
         run: |
           NPMRC_FILE="./apps/desktop/.npmrc"
@@ -182,14 +193,17 @@ jobs:
 
       # 6. 在 apps/desktop 下单独安装依赖
       - name: Install deps on Desktop
+        working-directory: lobe-chat-src
         run: npm run install-isolated --prefix=./apps/desktop
 
       # 7. 设置版本号
       - name: Set package version
+        working-directory: lobe-chat-src
         run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} canary
 
       # 8. Windows 构建前清理
       - name: Clean previous build artifacts (Windows)
+        working-directory: lobe-chat-src
         shell: pwsh
         run: |
           Remove-Item -Path apps\desktop\release -Recurse -Force -ErrorAction SilentlyContinue
@@ -202,6 +216,7 @@ jobs:
 
       # 9. 构建并打包 Windows 应用
       - name: Build artifact on Windows
+        working-directory: lobe-chat-src
         run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: canary
@@ -216,6 +231,7 @@ jobs:
 
       # 10. 显示构建产物
       - name: List final artifacts
+        working-directory: lobe-chat-src
         run: |
           echo "============================================================"
           echo "  构建产物列表"
@@ -230,8 +246,8 @@ jobs:
         with:
           name: release-windows
           path: |
-            apps/desktop/dist/
-            apps/desktop/release/
+            lobe-chat-src/apps/desktop/dist/
+            lobe-chat-src/apps/desktop/release/
           retention-days: 3
 
       # 12. 创建 GitHub Release
@@ -257,19 +273,20 @@ jobs:
             ### 📦 安装
             下载 `.exe` 文件运行安装
           files: |
-            apps/desktop/dist/latest*
-            apps/desktop/dist/*.exe*
-            apps/desktop/dist/*.msi
-            apps/desktop/dist/*.zip*
-            apps/desktop/release/latest*
-            apps/desktop/release/*.exe*
-            apps/desktop/release/*.msi
-            apps/desktop/release/*.zip*
+            lobe-chat-src/apps/desktop/dist/latest*
+            lobe-chat-src/apps/desktop/dist/*.exe*
+            lobe-chat-src/apps/desktop/dist/*.msi
+            lobe-chat-src/apps/desktop/dist/*.zip*
+            lobe-chat-src/apps/desktop/release/latest*
+            lobe-chat-src/apps/desktop/release/*.exe*
+            lobe-chat-src/apps/desktop/release/*.msi
+            lobe-chat-src/apps/desktop/release/*.zip*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 13. 构建完成输出
       - name: Windows build completed
+        working-directory: lobe-chat-src
         run: |
           echo "============================================================"
           echo "  🪟 Windows 构建完成！"
