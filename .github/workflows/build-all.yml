@@ -87,7 +87,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # ✅ 升级到 v7 (Node.js 24)
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
@@ -145,13 +144,19 @@ jobs:
       - name: Set package version
         run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} canary
 
-      - name: Clean previous build
+      # ✅ 修复：只清理 dist，不清理 release
+      - name: Clean previous build artifacts
         shell: pwsh
         run: |
-          Remove-Item -Path release -Recurse -Force -ErrorAction SilentlyContinue
+          # 只清理 dist 目录（构建临时文件）
           Remove-Item -Path dist -Recurse -Force -ErrorAction SilentlyContinue
+          
+          # 清理 C:\temp
           Remove-Item -Path C:\temp -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -Path C:\temp -ItemType Directory -Force
+          
+          Write-Host "✅ 已清理 dist 和 C:\temp"
+          Write-Host "ℹ️ release 目录保留（如果有旧版本）"
         env:
           TEMP: C:\temp
           TMP: C:\temp
@@ -169,7 +174,46 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 🔍 查找并显示主安装程序
+      # 🔍 诊断：查找所有 exe 文件
+      - name: Find all executables
+        shell: pwsh
+        run: |
+          Write-Host "============================================================"
+          Write-Host "  搜索所有构建产物..."
+          Write-Host "============================================================"
+          
+          Write-Host ""
+          Write-Host "=== 当前目录结构 ==="
+          Get-ChildItem -Force | Select-Object Name, PSIsContainer | Format-Table
+        
+          Write-Host ""
+          Write-Host "=== release 目录（如果有）==="
+          if (Test-Path release) {
+            Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table
+          } else {
+            Write-Host "❌ release 目录不存在"
+          }
+          
+          Write-Host ""
+          Write-Host "=== dist 目录（如果有）==="
+          if (Test-Path dist) {
+            Get-ChildItem -Path dist -Recurse -File -Filter *.exe | Select-Object FullName, Length | Format-Table
+          } else {
+            Write-Host "❌ dist 目录不存在"
+          }
+          
+          Write-Host ""
+          Write-Host "=== 所有 *-setup.exe 文件 ==="
+          $setupFiles = Get-ChildItem -Path . -Filter "*-setup.exe" -Recurse -ErrorAction SilentlyContinue
+          if ($setupFiles) {
+            $setupFiles | Select-Object FullName, Length | Format-Table
+          } else {
+            Write-Host "❌ 未找到 *-setup.exe 文件"
+          }
+          
+          Write-Host "============================================================"
+
+      # 🔍 查找主安装程序（搜索所有目录）
       - name: Find setup executable
         id: setup_file
         shell: pwsh
@@ -178,26 +222,33 @@ jobs:
           Write-Host "  查找主安装程序..."
           Write-Host "============================================================"
           
-          # 查找 *-setup.exe 文件
-          $setupFile = Get-ChildItem -Path release -Filter "*-setup.exe" -File | Select-Object -First 1
+          # 在所有目录中查找 *-setup.exe 文件
+          $setupFile = Get-ChildItem -Path . -Filter "*-setup.exe" -Recurse -File | 
+            Where-Object { $_.Name -notlike "*__uninstaller*" } |
+            Select-Object -First 1
           
           if ($setupFile) {
             Write-Host "✅ 找到主安装程序：$($setupFile.Name)"
             Write-Host "   完整路径：$($setupFile.FullName)"
             Write-Host "   文件大小：$([math]::Round($setupFile.Length / 1MB, 2)) MB"
             
-            # 输出文件名供后续步骤使用
+            # 复制文件到根目录 release 文件夹
+            $releaseDir = Join-Path $PWD "release"
+            if (-not (Test-Path $releaseDir)) {
+              New-Item -Path $releaseDir -ItemType Directory -Force | Out-Null
+            }
+            $destPath = Join-Path $releaseDir $setupFile.Name
+            Copy-Item -Path $setupFile.FullName -Destination $destPath -Force
+            Write-Host "✅ 已复制到：$destPath"
+            
             echo "filename=$($setupFile.Name)" >> $env:GITHUB_OUTPUT
           } else {
             Write-Host "❌ 未找到 *-setup.exe 文件！"
-            Write-Host "release 目录内容："
-            Get-ChildItem -Path release -File | Select-Object Name, Length
             echo "filename=" >> $env:GITHUB_OUTPUT
           }
           
           Write-Host "============================================================"
 
-      # 📦 上传完整的 release 目录作为 artifact
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -205,14 +256,12 @@ jobs:
           path: release/
           retention-days: 3
 
-      # 🎯 创建 Release（只上传主安装程序）
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
           name: ${{ needs.calculate-version.outputs.tag }}
           body: ""
-          # ✅ 只上传 *-setup.exe 文件
           files: release/*-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -222,13 +271,4 @@ jobs:
         run: |
           Write-Host "============================================================"
           Write-Host "  Windows 构建完成！"
-          Write-Host "============================================================"
-          Write-Host "版本：${{ needs.calculate-version.outputs.tag }}"
-          Write-Host "源码：${{ env.SOURCE_REPO }}@${{ env.SOURCE_BRANCH }}"
-          Write-Host ""
-          if (Test-Path "release/*-setup.exe") {
-            $setupFile = Get-ChildItem -Path "release" -Filter "*-setup.exe" | Select-Object -First 1
-            Write-Host "✅ 主安装程序：$($setupFile.Name)"
-          }
-          Write-Host "Release 地址：https://github.com/${{ github.repository }}/releases"
           Write-Host "============================================================"
