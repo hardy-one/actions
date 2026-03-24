@@ -10,7 +10,7 @@ on:
         default: 'latest'
       
       version:
-        description: 'Version number'
+        description: 'Version number (e.g., 2.1.45-hardy.1)'
         required: false
         type: string
 
@@ -29,6 +29,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     
     steps:
+      # ✅ 手动指定版本时使用
       - name: Use manual version
         if: ${{ inputs.version != '' && inputs.version != null }}
         id: version_manual
@@ -36,24 +37,38 @@ jobs:
           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
           echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
 
-      - name: Get latest tag via GitHub API
+      # ✅ 自动计算版本：基于官方 lobehub 的 stable tag
+      - name: Calculate hardy version from official lobehub tags
         if: ${{ inputs.version == '' || inputs.version == null }}
         id: version_auto
         run: |
-          response=$(curl -s "https://api.github.com/repos/${{ env.SOURCE_REPO }}/tags?per_page=100")
+          # 从官方 lobehub/lobehub 获取最新 stable tag
+          response=$(curl -s "https://api.github.com/repos/lobehub/lobehub/tags?per_page=100")
           latest_tag=$(echo "$response" | grep -oE '"name":\s*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/v\1/')
           
           if [ -z "$latest_tag" ]; then
-            version="$(date +%Y.%m.%d).${{ github.run_number }}"
+            echo "❌ No stable tag found, using fallback"
+            version="2.1.45-hardy.${{ github.run_number }}"
           else
+            echo "📌 Latest official stable tag: $latest_tag"
+            
+            # 解析版本号
             base_version="${latest_tag#v}"
             IFS='.' read -r major minor patch <<< "$base_version"
+            
+            # 基于官方版本 +1 作为 hardy base
             new_patch=$((patch + 1))
-            version="${major}.${minor}.${new_patch}"
+            base_hardy="${major}.${minor}.${new_patch}"
+            
+            # hardy 序号使用 run_number
+            version="${base_hardy}-hardy.${{ github.run_number }}"
           fi
-          
+
+          tag="v${version}"
+          echo "✅ Hardy version: ${version}"
+          echo "🏷️ Tag: ${tag}"
           echo "version=${version}" >> $GITHUB_OUTPUT
-          echo "tag=v${version}" >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
 
       - name: Set version output
         id: version
@@ -109,7 +124,6 @@ jobs:
     needs: [calculate-version]
     
     steps:
-      # 1. checkout 到根目录（关键：没有 path 参数）
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
@@ -117,24 +131,20 @@ jobs:
           ref: ${{ env.SOURCE_BRANCH }}
           fetch-depth: 0
 
-      # 2. 设置 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
-      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      # 4. 安装依赖（pnpm 会自动从 package.json 读取版本）
       - name: Install dependencies
         run: pnpm install --node-linker=hoisted
 
-      # 5. 移除国内 electron 镜像
       - name: Remove China electron mirror
         shell: bash
         run: |
@@ -143,19 +153,17 @@ jobs:
             rm -f "./apps/desktop/.npmrc.bak"
           fi
 
-      # 6. 在 apps/desktop 单独安装依赖（官方流程）
       - name: Install deps on Desktop
         run: npm run install-isolated --prefix=./apps/desktop
 
-      # 7. 设置版本号
+      # ✅ 设置版本号（格式：X.Y.Z-hardy.N）
       - name: Set package version
-        run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} canary
+        run: npm run workflow:set-desktop-version ${{ needs.calculate-version.outputs.version }} hardy
 
-      # 8. 构建并打包（关键：使用官方命令）
       - name: Build Windows App
         run: npm run desktop:package:app
         env:
-          UPDATE_CHANNEL: canary
+          UPDATE_CHANNEL: hardy
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
@@ -165,7 +173,6 @@ jobs:
           TEMP: C:\temp
           TMP: C:\temp
 
-      # 9. 显示 release 目录内容（诊断用）
       - name: List release directory
         shell: pwsh
         run: |
@@ -179,7 +186,6 @@ jobs:
           }
           Write-Host "============================================================"
 
-      # 10. 上传 artifact
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -187,13 +193,21 @@ jobs:
           path: apps/desktop/release/
           retention-days: 3
 
-      # 11. 创建 Release（只上传 setup.exe）
+      # ✅ 更新 action 版本到 v2.6.1（支持 Node.js 24）
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ needs.calculate-version.outputs.tag }}
           name: ${{ needs.calculate-version.outputs.tag }}
-          body: ""
+          body: |
+            ## 🔨 Hardy Build — ${{ needs.calculate-version.outputs.tag }}
+
+            > Custom build from `${{ env.SOURCE_BRANCH }}` branch of `${{ env.SOURCE_REPO }}`.
+
+            ### ⚠️ Important Notes
+            - This is a custom hardy build and is NOT intended for production use.
+            - May contain unstable or incomplete changes. Use at your own risk.
           files: apps/desktop/release/*-setup.exe
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
