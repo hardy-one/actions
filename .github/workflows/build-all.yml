@@ -207,7 +207,9 @@ jobs:
             ### ⚠️ Important Notes
             - This is a custom hardy build and is NOT intended for production use.
             - May contain unstable or incomplete changes. Use at your own risk.
-          files: apps/desktop/release/*-setup.exe
+          files: |
+            apps/desktop/release/*-setup.exe
+            apps/desktop/release/latest*.yml 
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
