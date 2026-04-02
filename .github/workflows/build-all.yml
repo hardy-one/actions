@@ -115,10 +115,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ inputs.docker_tag }}
             ${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
 
   build-windows:
     name: Build Windows Desktop
