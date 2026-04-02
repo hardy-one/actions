@@ -117,6 +117,8 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
 
   build-windows:
     name: Build Windows Desktop
